@@ -14,32 +14,32 @@
          failOnRisky="true"
          failOnWarning="true">
     <!--
-        Two suites, because they fail for different reasons and you want to know which.
+        One suite, over tests/, until there is a second thing to separate.
 
-        `unit` is ours: it can only go red because this library is wrong. `conformance` is
-        driven by a vendored copy of the Unicode working group's own JSON fixtures, so it can
-        also go red because upstream changed, or because the installed ICU disagrees with the
-        one the fixtures were generated against. Keeping them apart means a red build names
-        its own cause.
+        There were two: `unit` and a `conformance` suite pointing at tests/Conformance. That was
+        written before the conformance runner existed, and it cost a red CI run to find out why
+        that is a bad idea — PHPUnit exits 2 on "Test directory not found", and the directory was
+        missing because nothing had created it yet.
 
-        failOnEmptyTestSuite is on for one specific reason: the conformance provider globs
-        JSON out of tests/conformance, and a mis-globbed path would otherwise yield zero
-        cases and report a pass. An empty suite is the failure mode most likely to be
-        mistaken for success, so it is the one made loudest.
+        Worse, it passed locally. tests/fixtures/conformance/ was then tests/conformance/, and a
+        Docker bind mount on Windows inherits the host filesystem's case-insensitivity, so
+        "tests/Conformance" resolved to the *fixtures* directory inside the container. The
+        fixtures are JSON, so the suite was empty rather than absent, and it reported OK. Linux
+        CI, being case-sensitive, found neither.
 
-        beStrictAboutCoverageMetadata is off, matching meraki/schema: a conformance test
-        legitimately executes most of the library, and naming all of it in #[UsesClass] would
-        be hundreds of attributes that assert nothing. requireCoverageMetadata stays on, so
-        every test still declares what it covers.
+        Two lessons are baked in here. The fixtures moved to tests/fixtures/conformance/ so no
+        path differs from another only by case. And a testsuite is declared when the directory
+        it names exists, not in anticipation of it.
+
+        beStrictAboutCoverageMetadata is off, matching meraki/schema: a conformance test will
+        legitimately execute most of the library, and naming all of it in #[UsesClass] would be
+        hundreds of attributes that assert nothing. requireCoverageMetadata stays on, so every
+        test still declares what it covers.
     -->
 
     <testsuites>
-        <testsuite name="unit">
+        <testsuite name="default">
             <directory>tests</directory>
-            <exclude>tests/Conformance</exclude>
-        </testsuite>
-        <testsuite name="conformance">
-            <directory>tests/Conformance</directory>
         </testsuite>
     </testsuites>
 

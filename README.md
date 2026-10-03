@@ -71,8 +71,8 @@ authoritative — it would only change what `:number` and `:date` print.
 
 ## The conformance suite
 
-`tests/conformance/` is a **verbatim copy** of the Unicode working group's own fixtures, pinned
-to one commit in `tests/conformance/UPSTREAM`. Do not edit it.
+`tests/fixtures/conformance/` is a **verbatim copy** of the Unicode working group's own
+fixtures, pinned to one commit in `tests/fixtures/conformance/UPSTREAM`. Do not edit it.
 
 ```sh
 docker compose run --rm dev composer suite:update   # refresh and re-pin
@@ -84,10 +84,19 @@ tests, and so that an upstream change shows up in review as the expectations tha
 than as one line of hex. `suite:check` runs weekly on a schedule instead of on every push,
 because upstream moving is not a reason to fail somebody's unrelated commit.
 
-`tests/conformance/message.abnf` is pinned from the same commit, and
+`tests/fixtures/conformance/message.abnf` is pinned from the same commit, and
 `tests/Syntax/AbnfAgreementTest.php` re-derives every character class from it and fails if
 `Syntax\CodePoints` has drifted — so the grammar cannot quietly disagree with the transcription
 of it.
+
+### One thing the container cannot catch
+
+A Docker bind mount on Windows inherits the host filesystem's **case-insensitivity**, so a
+path that differs from another only by case resolves to the wrong one inside the container
+and the tests still pass. Linux CI is the only place that surfaces. It has already happened
+once, between `tests/conformance/` and a planned `tests/Conformance/`, which is why the
+fixtures now live under `tests/fixtures/`. Treat a green local run as necessary and not
+sufficient.
 
 ## Licence
 

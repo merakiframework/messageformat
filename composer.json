@@ -52,7 +52,6 @@
     "scripts": {
         "test": "phpunit",
         "test:environment": "php tools/check-environment.php",
-        "test:conformance": "phpunit --testsuite conformance",
         "test:coverage": [
             "@putenv XDEBUG_MODE=coverage",
             "phpunit --coverage-text"
@@ -76,7 +75,6 @@
     "scripts-descriptions": {
         "test": "Run the test suite.",
         "test:environment": "Fail if the interpreter cannot answer what the suite asks of it.",
-        "test:conformance": "Run only the Unicode conformance suite.",
         "test:coverage": "Run the suite with coverage (needs Xdebug or pcov).",
         "analyse": "Run PHPStan.",
         "style": "Fix formatting.",

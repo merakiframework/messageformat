@@ -32,7 +32,7 @@ use PHPUnit\Framework\TestCase;
 #[CoversClass(CodePoints::class)]
 final class AbnfAgreementTest extends TestCase
 {
-	private const ABNF = __DIR__ . '/../conformance/message.abnf';
+	private const ABNF = __DIR__ . '/../fixtures/conformance/message.abnf';
 
 	/** ABNF core rules, which message.abnf uses without defining. */
 	private const CORE = [

@@ -19,7 +19,7 @@ declare(strict_types=1);
 $finder = PhpCsFixer\Finder::create()
 	->in([__DIR__ . '/src', __DIR__ . '/tests', __DIR__ . '/tools'])
 	// Upstream's fixtures and the generated tables are not ours to format.
-	->exclude(['conformance'])
+	->exclude(['fixtures'])
 	->notPath('Plural/Data/CardinalRules.php')
 	->notPath('Plural/Data/OrdinalRules.php');
 

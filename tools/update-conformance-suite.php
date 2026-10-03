@@ -27,7 +27,7 @@ const UPSTREAM_DIR = 'test';
 /** Pinned alongside the fixtures because AbnfAgreementTest derives its ranges from it. */
 const EXTRA_FILES = ['spec/message.abnf'];
 
-const LOCAL_DIR = __DIR__ . '/../tests/conformance';
+const LOCAL_DIR = __DIR__ . '/../tests/fixtures/conformance';
 const PIN_FILE = LOCAL_DIR . '/UPSTREAM';
 
 $arguments = $_SERVER['argv'] ?? [];
