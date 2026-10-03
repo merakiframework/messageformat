@@ -60,7 +60,7 @@
         "analyse": "phpstan analyse --no-progress --memory-limit=1G",
         "style": "php-cs-fixer fix",
         "test:style": "php-cs-fixer fix --dry-run --diff --show-progress=none",
-        "hooks:install": "git config core.hooksPath .githooks",
+        "hooks:install": "php tools/install-hooks.php",
         "post-install-cmd": "@hooks:install",
         "suite:update": "php tools/update-conformance-suite.php",
         "suite:check": "php tools/update-conformance-suite.php --check",
@@ -81,7 +81,7 @@
         "analyse": "Run PHPStan.",
         "style": "Fix formatting.",
         "test:style": "Fail if anything is unformatted.",
-        "hooks:install": "Point git at .githooks.",
+        "hooks:install": "Point git at .githooks. Never fails the install if it cannot.",
         "suite:update": "Re-download the Unicode conformance suite and record its commit SHA.",
         "suite:check": "Fail if the vendored conformance suite is behind upstream.",
         "ci": "Run everything CI runs, in the same order."
