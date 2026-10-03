@@ -1,0 +1,52 @@
+name: A deliberate divergence from the specification
+description: Record a place where this library knowingly differs from MessageFormat 2, and why.
+labels: ["spec-divergence"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For differences that are **known and accepted**, not for bugs. If the behaviour is simply
+        wrong and should be fixed, the bug or conformance template is the better fit.
+
+        The point of these is that the reasoning survives. A divergence recorded only in a code
+        comment is one nobody finds when deciding whether this library is usable.
+
+  - type: textarea
+    id: divergence
+    attributes:
+      label: What differs
+      description: What the specification requires, and what happens here instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Which section, fixture or measurement establishes the specified behaviour. A measured table beats a description.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it is accepted
+      description: What the alternative would cost. If it is blocked on something external — an `ext-intl` capability, an ICU version — say so and add the `needs-icu` label.
+    validations:
+      required: true
+
+  - type: textarea
+    id: visibility
+    attributes:
+      label: Where it is already recorded
+      description: The docblock, the test that pins current behaviour, the conformance skip reason. Anything that would otherwise make this look like an oversight.
+    validations:
+      required: false
+
+  - type: textarea
+    id: closing
+    attributes:
+      label: What closing it would take
+      description: Or state plainly that it is not planned, and what would change that.
+    validations:
+      required: true

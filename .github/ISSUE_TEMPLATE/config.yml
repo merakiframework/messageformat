@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: The MessageFormat 2 specification
+    url: https://unicode.org/reports/tr35/tr35-messageFormat.html
+    about: Stable since CLDR 47. Worth checking before filing, because the specification is often stranger than it looks — whitespace at the start of a simple message is significant, for instance.
+  - name: The specification's own issue tracker
+    url: https://github.com/unicode-org/message-format-wg/issues
+    about: For questions about what MessageFormat 2 should do. Issues here are about what this implementation does.

@@ -1,0 +1,57 @@
+name: A conformance case fails or is wrongly skipped
+description: A case in tests/fixtures/conformance behaves differently here, or is being skipped when it should be asserted.
+labels: ["conformance"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The suite runs every one of the 462 upstream cases. A case this library cannot answer yet
+        is skipped **with a reason**, so the skip list is the to-do list.
+
+        Two different reports fit here: a case that fails, and a case that is skipped for a reason
+        that no longer applies. The second is easy to miss and worth filing.
+
+  - type: input
+    id: case
+    attributes:
+      label: Which case
+      description: The file and index, as the test name prints them.
+      placeholder: syntax.json[90]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is wrong with it
+      options:
+        - It fails
+        - It is skipped, and should not be
+        - It passes here and should not
+    validations:
+      required: true
+
+  - type: textarea
+    id: detail
+    attributes:
+      label: Detail
+      description: For a failure, the message the runner printed. For a wrong skip, the reason given and why it no longer applies.
+    validations:
+      required: true
+
+  - type: input
+    id: icu
+    attributes:
+      label: ICU version
+      description: Some expectations are CLDR data rather than library logic, so this decides whether it is drift or a defect. `docker compose run --rm dev composer test:environment` prints it.
+      placeholder: ICU 76.1
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: fixtures
+    attributes:
+      label: Please confirm
+      options:
+        - label: I have not edited anything under `tests/fixtures/conformance`. It is a verbatim copy of an upstream commit, and `composer suite:check` compares the pin against upstream.
+          required: true

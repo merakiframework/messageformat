@@ -1,0 +1,74 @@
+name: A message formats wrongly
+description: This library produces different output, or a different error, from what MessageFormat 2 asks for.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful thing you can give is **the message source and the arguments**, because
+        almost everything here is reproducible from those two alone.
+
+        If you already know which conformance fixture covers it, say so and skip most of this.
+
+  - type: textarea
+    id: source
+    attributes:
+      label: The message
+      description: The source, exactly as the library receives it. Whitespace matters — it is significant at the start and end of a simple message.
+      placeholder: Hello, {$userName}!
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: locale
+    attributes:
+      label: Locale
+      placeholder: en-US
+    validations:
+      required: true
+
+  - type: textarea
+    id: arguments
+    attributes:
+      label: Arguments
+      description: As PHP, so that the types are visible. A string `"1.3"` and a float `1.3` are not the same input.
+      placeholder: "['userName' => 'John', 'count' => 3]"
+      render: php
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen
+      description: The output or error you expected, and where that expectation comes from — a section of the specification, a conformance fixture, or another implementation's behaviour.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happens instead
+      description: The output, or the exception class and message.
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: PHP and ICU
+      description: "Run: `php -r \"printf('PHP %s, ICU %s', PHP_VERSION, INTL_ICU_VERSION);\"` — or `docker compose run --rm dev composer test:environment`, which also checks that the CLDR locale data is really there."
+      placeholder: PHP 8.5.11, ICU 76.1
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: known
+    attributes:
+      label: Before you file
+      options:
+        - label: I have read the open `spec-divergence` issues, in case this is already recorded.
+          required: false
+        - label: I have checked whether `composer test:environment` passes, since minimal ICU locale data makes every non-English locale behave as though it were English.
+          required: false
