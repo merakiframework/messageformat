@@ -4,16 +4,19 @@ declare(strict_types=1);
 namespace Meraki\MessageFormat\Model;
 
 /**
- * `{"type": "message", "declarations": [...], "pattern": [...]}`
+ * Either of the data model's two top-level shapes.
  *
- * A message with a single pattern. The data model's other top-level shape, `select`, arrives
- * with the matcher; until then `declarations` is always empty, and it is present rather than
- * omitted because the data model requires the key.
+ * message.json is `oneOf [message, select]`, and the two differ in how they choose what to
+ * format: {@see PatternMessage} has one pattern, {@see SelectMessage} picks between several. What
+ * they share is declarations, which is what this interface carries — and it is the whole of it,
+ * because a shared method nothing needs would be speculation.
+ *
+ * Named for the specification's `message`, not for the ABNF's `simple-message`. Those are
+ * different cuts: an ABNF `complex-message` is a quoted pattern *or* a matcher, so it becomes
+ * either shape depending on which.
  */
-final class Message
+interface Message
 {
-	/** @param list<string|Expression|Markup> $pattern text runs, placeholders and markup, in order */
-	public function __construct(public readonly array $pattern = [])
-	{
-	}
+	/** @return list<InputDeclaration|LocalDeclaration> in source order */
+	public function declarations(): array;
 }

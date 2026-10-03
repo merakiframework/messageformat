@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Meraki\MessageFormat\Model;
 
+use LogicException;
+
 /**
  * The model as `spec/data-model/message.json` describes it.
  *
@@ -21,18 +23,80 @@ namespace Meraki\MessageFormat\Model;
  * schema lists the properties in.
  *
  * Empty `options` and `attributes` are omitted rather than emitted as `{}`, because the schema
- * makes them optional and a reader cannot tell an absent map from an empty one.
+ * makes them optional and a reader cannot tell an absent map from an empty one. `declarations`
+ * is **not** omitted when empty, because the schema requires the key.
  */
 final class Serializer
 {
 	/** @return array<string, mixed> */
 	public static function toArray(Message $message): array
 	{
+		if ($message instanceof SelectMessage) {
+			return [
+				'type' => 'select',
+				'declarations' => self::declarations($message->declarations()),
+				'selectors' => array_map(self::operand(...), $message->selectors),
+				'variants' => array_map(self::variant(...), $message->variants),
+			];
+		}
+
+		if (!$message instanceof PatternMessage) {
+			// The interface has exactly these two implementations, and a third would be a
+			// programming error rather than a message somebody wrote. Said out loud rather
+			// than narrowed by elimination, which no analyser can check.
+			throw new LogicException(sprintf('There is no serialisation for %s.', $message::class));
+		}
+
 		return [
 			'type' => 'message',
-			'declarations' => [],
-			'pattern' => array_map(self::element(...), $message->pattern),
+			'declarations' => self::declarations($message->declarations()),
+			'pattern' => self::pattern($message->pattern),
 		];
+	}
+
+	/**
+	 * @param list<InputDeclaration|LocalDeclaration> $declarations
+	 * @return list<array<string, mixed>>
+	 */
+	private static function declarations(array $declarations): array
+	{
+		$out = [];
+
+		foreach ($declarations as $declaration) {
+			$out[] = [
+				'type' => $declaration instanceof InputDeclaration ? 'input' : 'local',
+				'name' => $declaration->name,
+				'value' => self::expression($declaration->value),
+			];
+		}
+
+		return $out;
+	}
+
+	/** @return array<string, mixed> */
+	private static function variant(Variant $variant): array
+	{
+		return [
+			'keys' => array_map(self::key(...), $variant->keys),
+			'value' => self::pattern($variant->value),
+		];
+	}
+
+	/** @return array<string, mixed> */
+	private static function key(Literal|CatchAll $key): array
+	{
+		// The catch-all's `value` is optional in the schema and carries nothing, so it is left
+		// out: `{"type": "*"}` is the whole of it.
+		return $key instanceof CatchAll ? ['type' => '*'] : self::operand($key);
+	}
+
+	/**
+	 * @param list<string|Expression|Markup> $pattern
+	 * @return list<string|array<string, mixed>>
+	 */
+	private static function pattern(array $pattern): array
+	{
+		return array_map(self::element(...), $pattern);
 	}
 
 	/** @return string|array<string, mixed> */

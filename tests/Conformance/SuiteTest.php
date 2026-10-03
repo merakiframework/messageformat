@@ -10,7 +10,11 @@ use Meraki\MessageFormat\Error\SyntaxError;
 use Meraki\MessageFormat\Error\Unsupported;
 use Meraki\MessageFormat\MessageFormatter;
 use Meraki\MessageFormat\Model\Expression;
+use Meraki\MessageFormat\Model\Markup;
 use Meraki\MessageFormat\Model\Message;
+use Meraki\MessageFormat\Model\PatternMessage;
+use Meraki\MessageFormat\Model\SelectMessage;
+use Meraki\MessageFormat\Model\Variant;
 use Meraki\MessageFormat\Syntax\Parser;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -58,11 +62,11 @@ final class SuiteTest extends TestCase
 	 * syntax-errors.json -- the count dropped to 68 and nothing failed. A green suite that
 	 * asserts almost nothing is the failure mode worth guarding.
 	 *
-	 * Today: 171 of 462. The remainder are complex messages (179), the function registry (105),
-	 * bidi isolation (5) and locale formatting of a non-string argument (2); the summary test
-	 * names each one and its count.
+	 * Today: 260 of 462, up from 171 when complex messages landed. The remainder are the
+	 * function registry (187), bidi isolation (13) and locale formatting of a non-string
+	 * argument (2); the summary test names each one and its count.
 	 */
-	private const ASSERTED_FLOOR = 171;
+	private const ASSERTED_FLOOR = 260;
 
 	/** @return iterable<string, array{array<array-key, mixed>}> */
 	public static function cases(): iterable
@@ -170,10 +174,10 @@ final class SuiteTest extends TestCase
 		$expected = $case['exp'] ?? null;
 		$expectedErrors = self::expectedErrors($case);
 
+		// Unsupported is not caught here. The parser handles every production now, so only
+		// formatting can report something unimplemented -- and that has its own catch below.
 		try {
 			$message = Parser::parse($source);
-		} catch (Unsupported $unsupported) {
-			return self::skip($unsupported->getMessage());
 		} catch (SyntaxError $error) {
 			return self::decide(
 				in_array(ErrorType::Syntax->slug(), $expectedErrors, true),
@@ -244,7 +248,14 @@ final class SuiteTest extends TestCase
 		}
 
 		$locale = is_string($case['locale'] ?? null) ? $case['locale'] : 'en-US';
-		$actual = MessageFormatter::for($locale)->format($source, $arguments);
+
+		try {
+			$actual = MessageFormatter::for($locale)->format($source, $arguments);
+		} catch (Unsupported $unsupported) {
+			// Parsing a matcher needs no registry; executing one does. So Unsupported can
+			// now arrive from formatting as well as from parsing.
+			return self::skip($unsupported->getMessage());
+		}
 
 		return self::decide(
 			$actual === $expected,
@@ -275,27 +286,63 @@ final class SuiteTest extends TestCase
 		return $slugs;
 	}
 
+	/**
+	 * Whether anything in the message needs a function handler.
+	 *
+	 * Declarations are searched as well as patterns, which matters more than it sounds: a
+	 * matcher cannot be valid without an annotated selector, and a selector can only be
+	 * annotated in a declaration. So every valid `.match` message is caught here, and none of
+	 * them are caught by looking at patterns alone.
+	 */
 	private static function usesAFunction(Message $message): bool
 	{
-		foreach ($message->pattern as $element) {
-			if ($element instanceof Expression && $element->function !== null) {
+		foreach ($message->declarations() as $declaration) {
+			if ($declaration->value->function !== null) {
 				return true;
+			}
+		}
+
+		foreach (self::patternsOf($message) as $pattern) {
+			foreach ($pattern as $element) {
+				if ($element instanceof Expression && $element->function !== null) {
+					return true;
+				}
 			}
 		}
 
 		return false;
 	}
 
-	/** Whether anything in the pattern is a thing the bidi strategy would isolate. */
+	/** Whether anything in the message is a thing the bidi strategy would isolate. */
 	private static function hasPlaceholder(Message $message): bool
 	{
-		foreach ($message->pattern as $element) {
-			if (!is_string($element)) {
-				return true;
+		foreach (self::patternsOf($message) as $pattern) {
+			foreach ($pattern as $element) {
+				if (!is_string($element)) {
+					return true;
+				}
 			}
 		}
 
 		return false;
+	}
+
+	/**
+	 * Every pattern in the message: the one a PatternMessage has, or one per variant.
+	 *
+	 * @return list<list<string|Expression|Markup>>
+	 */
+	private static function patternsOf(Message $message): array
+	{
+		if ($message instanceof PatternMessage) {
+			return [$message->pattern];
+		}
+
+		if (!$message instanceof SelectMessage) {
+			return [];
+		}
+
+		return array_map(static fn(Variant $variant): array => $variant->value, $message->variants);
 	}
 
 	/** @return array{skip: string|null, ok: bool, why: string} */

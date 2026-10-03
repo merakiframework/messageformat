@@ -6,11 +6,16 @@ namespace Meraki\MessageFormat;
 use Meraki\MessageFormat\Error\FallbackString;
 use Meraki\MessageFormat\Error\MessageFormatError;
 use Meraki\MessageFormat\Error\ResolutionError;
+use Meraki\MessageFormat\Error\Unsupported;
+use Meraki\MessageFormat\Icu\Normalisation;
 use Meraki\MessageFormat\Model\Expression;
+use Meraki\MessageFormat\Model\InputDeclaration;
 use Meraki\MessageFormat\Model\Literal;
 use Meraki\MessageFormat\Model\Markup;
 use Meraki\MessageFormat\Model\Message;
+use Meraki\MessageFormat\Model\PatternMessage;
 use Meraki\MessageFormat\Model\VariableRef;
+use Meraki\MessageFormat\Runtime\Bindings;
 use Meraki\MessageFormat\Syntax\Parser;
 use Stringable;
 
@@ -25,13 +30,23 @@ use Stringable;
  * the spec asks of a formatter that does not know `:number`. What the registry changes is which
  * names are unknown, not what happens to the ones that are.
  *
+ * ### Declarations are lazy, and that is load-bearing
+ *
+ * A declaration is evaluated the first time the pattern reads it, and never if it does not.
+ * syntax.json expects `.input{$x}{{}}` with no arguments at all to format to the empty string
+ * with **no errors**, so evaluating declarations up front would invent an unresolved-variable
+ * error for a message the specification says is clean. Results are memoised, which is also what
+ * satisfies "every expression is evaluated at most once": reading `{$a} {$a}` with nothing bound
+ * reports one error, not two.
+ *
  * ### What is not here yet
  *
- * Complex messages — declarations, matchers, quoted patterns — raise
- * {@see \Meraki\MessageFormat\Error\Unsupported} from the parser. Formatted parts, and so any
- * access to markup, arrive with the parts API. Locale-aware number and date formatting arrives
- * with the functions that do it; `$locale` is held here and not yet consulted, which is honest
- * about the fact that nothing in this milestone varies by it.
+ * Executing a matcher. A valid `.match` always has an annotated selector — an unannotated one is
+ * a Missing Selector Annotation error — so selection cannot run before the function registry
+ * exists. Parsing and validating a matcher needs no registry, which is why this milestone goes
+ * that far and stops. Formatted parts, and so any access to markup, arrive with the parts API.
+ * `$locale` is held and not yet consulted, which is honest about nothing in this milestone
+ * varying by it.
  */
 final class MessageFormatter
 {
@@ -57,7 +72,8 @@ final class MessageFormatter
 	/**
 	 * @param array<string, mixed> $arguments
 	 * @throws Error\SyntaxError if the message is not well-formed
-	 * @throws Error\Unsupported if the message uses something not implemented yet
+	 * @throws Error\DataModelError if it is well-formed and still not a valid message
+	 * @throws Unsupported if it uses something not implemented yet
 	 * @throws MessageFormatError in strict mode, on the first resolution error
 	 */
 	public function format(string $source, array $arguments = []): string
@@ -73,26 +89,31 @@ final class MessageFormatter
 	 * cannot provide the second.
 	 *
 	 * @param array<string, mixed> $arguments
-	 * @throws Error\SyntaxError|Error\Unsupported|MessageFormatError
+	 * @throws Error\SyntaxError|Error\DataModelError|Unsupported|MessageFormatError
 	 */
 	public function formatWithDiagnostics(string $source, array $arguments = []): FormattedMessage
 	{
-		// Outside the error collector on purpose. A malformed message has no data model, so
-		// there is nothing to fall back to, and the spec prioritises syntax errors over all
-		// others. Both modes raise.
-		$message = Parser::parse($source);
-
-		return $this->formatMessage($message, $arguments);
+		// Outside the error collector on purpose. A message that is malformed has no data model
+		// and one that is invalid has no meaning, so there is nothing to fall back to, and the
+		// spec prioritises both over every other error. Both modes raise.
+		return $this->formatMessage(Parser::parse($source), $arguments);
 	}
 
 	/**
 	 * @param array<string, mixed> $arguments
+	 * @throws Unsupported if the message is a matcher
 	 * @throws MessageFormatError in strict mode
 	 */
 	public function formatMessage(Message $message, array $arguments = []): FormattedMessage
 	{
-		$text = '';
+		if (!$message instanceof PatternMessage) {
+			throw Unsupported::feature('choosing between the variants of a matcher');
+		}
+
+		$bindings = Bindings::of($message->declarations(), $arguments);
 		$errors = [];
+		$resolved = [];
+		$text = '';
 
 		foreach ($message->pattern as $element) {
 			if (is_string($element)) {
@@ -106,55 +127,137 @@ final class MessageFormatter
 				continue;
 			}
 
-			$text .= $this->expression($element, $arguments, $errors);
+			$text .= $this->expression($element, $bindings, $resolved, $errors);
 		}
 
 		return new FormattedMessage($text, $errors);
 	}
 
 	/**
-	 * @param array<string, mixed> $arguments
+	 * One placeholder, as text.
+	 *
+	 * @param array<string, string|null> $resolved
 	 * @param list<MessageFormatError> $errors
 	 * @throws MessageFormatError in strict mode
 	 */
-	private function expression(Expression $expression, array $arguments, array &$errors): string
-	{
+	private function expression(
+		Expression $expression,
+		Bindings $bindings,
+		array &$resolved,
+		array &$errors,
+	): string {
 		// Checked before the operand, because with no registry there is nothing the operand
 		// could be handed to. Once functions exist the operand resolves first, which is what
 		// lets `{$missing :number}` report both an unresolved variable and a bad operand.
 		if ($expression->function !== null) {
-			return $this->fallBack(
-				ResolutionError::unknownFunction($expression->function->name),
-				$expression,
-				$errors,
-			);
+			$this->report(ResolutionError::unknownFunction($expression->function->name), $errors);
+
+			return FallbackString::for($expression);
 		}
 
-		$arg = $expression->arg;
+		$operand = $expression->arg;
 
-		if ($arg instanceof Literal) {
-			return $arg->value;
+		if ($operand instanceof Literal) {
+			return $operand->value;
 		}
 
-		if (!$arg instanceof VariableRef) {
+		if (!$operand instanceof VariableRef) {
 			// Unreachable against a parsed message: the data model requires an operand or a
 			// function, and the function was handled above.
-			return $this->fallBack(
+			$this->report(
 				ResolutionError::badOperand('the placeholder has neither an operand nor a function'),
-				$expression,
 				$errors,
 			);
+
+			return FallbackString::for($expression);
 		}
 
-		if (!array_key_exists($arg->name, $arguments)) {
-			return $this->fallBack(
-				ResolutionError::unresolvedVariable($arg->name),
-				$expression,
-				$errors,
-			);
+		$value = $this->resolve($operand->name, $bindings, $resolved, $errors);
+
+		return $value ?? FallbackString::for($expression);
+	}
+
+	/**
+	 * A variable's value, evaluated once and remembered.
+	 *
+	 * Null means "could not be resolved", with the reason already reported. The caller turns that
+	 * into a fallback string built from **its own** expression rather than from the declaration:
+	 * fallback.json[4] formats `.local $var = {|val| :test:undefined} {{{$var}}}` as `{$var}`,
+	 * naming the placeholder that was read and not the literal inside the declaration.
+	 *
+	 * @param array<string, string|null> $resolved
+	 * @param list<MessageFormatError> $errors
+	 * @throws MessageFormatError in strict mode
+	 */
+	private function resolve(
+		string $name,
+		Bindings $bindings,
+		array &$resolved,
+		array &$errors,
+	): ?string {
+		$key = Normalisation::nfc($name);
+
+		if (array_key_exists($key, $resolved)) {
+			return $resolved[$key];
 		}
 
-		return $this->asText($arguments[$arg->name], $expression, $errors);
+		// Written before resolving, so a re-entrant read answers null rather than recursing for
+		// ever. A cycle requires using a variable before declaring it, which is a Duplicate
+		// Declaration and already refused — this is here so that a change to that check cannot
+		// turn into a hang.
+		$resolved[$key] = null;
+
+		$declaration = $bindings->declarationFor($key);
+
+		if ($declaration === null) {
+			// An implicit input: no declaration, so the argument is the whole of it.
+			return $resolved[$key] = $this->argument($key, $name, $bindings, $errors);
+		}
+
+		if ($declaration->value->function !== null) {
+			$this->report(ResolutionError::unknownFunction($declaration->value->function->name), $errors);
+
+			return $resolved[$key] = null;
+		}
+
+		if ($declaration instanceof InputDeclaration) {
+			// The operand of an input declaration *is* the declared variable, so it names the
+			// external argument rather than something to resolve further.
+			return $resolved[$key] = $this->argument($key, $name, $bindings, $errors);
+		}
+
+		$operand = $declaration->value->arg;
+
+		if ($operand instanceof Literal) {
+			return $resolved[$key] = $operand->value;
+		}
+
+		if ($operand instanceof VariableRef) {
+			return $resolved[$key] = $this->resolve($operand->name, $bindings, $resolved, $errors);
+		}
+
+		return $resolved[$key] = null;
+	}
+
+	/**
+	 * @param string $key the name in NFC
+	 * @param string $name the name as written, for the error message
+	 * @param list<MessageFormatError> $errors
+	 * @throws MessageFormatError in strict mode
+	 */
+	private function argument(
+		string $key,
+		string $name,
+		Bindings $bindings,
+		array &$errors,
+	): ?string {
+		if (!$bindings->hasArgument($key)) {
+			$this->report(ResolutionError::unresolvedVariable($name), $errors);
+
+			return null;
+		}
+
+		return $this->asText($bindings->argument($key), $name, $errors);
 	}
 
 	/**
@@ -169,7 +272,7 @@ final class MessageFormatter
 	 * @param list<MessageFormatError> $errors
 	 * @throws MessageFormatError in strict mode
 	 */
-	private function asText(mixed $value, Expression $expression, array &$errors): string
+	private function asText(mixed $value, string $name, array &$errors): ?string
 	{
 		if (is_string($value)) {
 			return $value;
@@ -183,31 +286,33 @@ final class MessageFormatter
 			return (string) $value;
 		}
 
-		return $this->fallBack(
+		$this->report(
 			ResolutionError::badOperand(sprintf(
-				'a %s has no text form without a function to give it one',
+				'"$%s" holds a %s, which has no text form without a function to give it one',
+				$name,
 				get_debug_type($value),
 			)),
-			$expression,
 			$errors,
 		);
+
+		return null;
 	}
 
 	/**
+	 * Record an error, or raise it.
+	 *
+	 * The one place the two modes differ, which is what keeps them two doors onto one engine
+	 * rather than two code paths.
+	 *
 	 * @param list<MessageFormatError> $errors
 	 * @throws MessageFormatError in strict mode
 	 */
-	private function fallBack(
-		MessageFormatError $error,
-		Expression $expression,
-		array &$errors,
-	): string {
+	private function report(MessageFormatError $error, array &$errors): void
+	{
 		if ($this->errorHandling === ErrorHandling::Strict) {
 			throw $error;
 		}
 
 		$errors[] = $error;
-
-		return FallbackString::for($expression);
 	}
 }

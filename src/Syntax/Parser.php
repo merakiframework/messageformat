@@ -5,23 +5,29 @@ namespace Meraki\MessageFormat\Syntax;
 
 use Meraki\MessageFormat\Error\DataModelError;
 use Meraki\MessageFormat\Error\SyntaxError;
-use Meraki\MessageFormat\Error\Unsupported;
+use Meraki\MessageFormat\Model\CatchAll;
 use Meraki\MessageFormat\Model\Expression;
 use Meraki\MessageFormat\Model\FunctionRef;
+use Meraki\MessageFormat\Model\InputDeclaration;
 use Meraki\MessageFormat\Model\Literal;
+use Meraki\MessageFormat\Model\LocalDeclaration;
 use Meraki\MessageFormat\Model\Markup;
 use Meraki\MessageFormat\Model\MarkupKind;
 use Meraki\MessageFormat\Model\Message;
+use Meraki\MessageFormat\Model\PatternMessage;
+use Meraki\MessageFormat\Model\SelectMessage;
 use Meraki\MessageFormat\Model\VariableRef;
+use Meraki\MessageFormat\Model\Validator;
+use Meraki\MessageFormat\Model\Variant;
 
 /**
- * Recursive descent over `simple-message`.
+ * Recursive descent over the whole grammar.
  *
  * Follows the ABNF production by production, so each method is named after the rule it reads and
  * can be checked against message.abnf by eye. {@see CodePoints} answers which characters are
  * which and {@see Scanner} holds the index; this owns only the order they may come in.
  *
- * ### The leading whitespace trap
+ * ### Whitespace means opposite things in the two kinds of message
  *
  * `simple-message = o [simple-start pattern]` looks like it discards leading whitespace, and it
  * does not. The specification is explicit: *"Whitespace at the start or end of a simple message
@@ -30,8 +36,16 @@ use Meraki\MessageFormat\Model\VariableRef;
  * so makes a leading dot unambiguously the start of a complex message. What it matched is still
  * text.
  *
- * A complex message is the opposite — its leading and trailing whitespace is insignificant —
- * which is why the two are decided before either is parsed.
+ * `complex-message = o *(declaration o) complex-body o` is the opposite: *"Whitespace at the
+ * start or end of a complex message is not significant."* So `"  {{}}  "` formats to the empty
+ * string while `"\n hello\t"` formats to itself.
+ *
+ * Inside `{{…}}` the rules change again, because the content is an ordinary `pattern`: there a
+ * leading space is text and a leading dot is text, which is why `{{ .local $x = {$y}}}` formats
+ * to `" .local $x = Y"` rather than declaring anything.
+ *
+ * Those three readings of the same characters are decided before anything is parsed, in
+ * {@see self::message()}, and each is pinned by a fixture.
  */
 final class Parser
 {
@@ -46,9 +60,13 @@ final class Parser
 	private const SLASH = 0x2F;
 	private const DOT = 0x2E;
 	private const EQUALS = 0x3D;
+	private const ASTERISK = 0x2A;
 
 	/** `escaped-char = backslash ( backslash / "{" / "|" / "}" )` */
 	private const ESCAPABLE = [self::BACKSLASH, self::BRACE_OPEN, self::PIPE, self::BRACE_CLOSE];
+
+	/** Every keyword is six code points, which is why advancing past one needs no measuring. */
+	private const KEYWORD_LENGTH = 6;
 
 	private function __construct(private readonly Scanner $scanner)
 	{
@@ -57,36 +75,37 @@ final class Parser
 	/**
 	 * @throws SyntaxError if the source is not well-formed
 	 * @throws DataModelError if it is well-formed and still not a valid message
-	 * @throws Unsupported if it is a complex message, which is valid but not implemented yet
 	 */
 	public static function parse(string $source): Message
 	{
-		return (new self(Scanner::over($source)))->message();
+		$message = (new self(Scanner::over($source)))->message();
+
+		// Validity is checked here so that this is the only door, and everything past it
+		// holds a message that is both well-formed and valid. A caller that could get an
+		// unvalidated model would eventually format one.
+		Validator::check($message);
+
+		return $message;
 	}
 
 	/** `message = simple-message / complex-message` */
 	private function message(): Message
 	{
-		// Collected, not discarded: for a simple message this is text. See the class docblock.
+		// Collected rather than discarded, because for a simple message it is text. For a complex
+		// one it is dropped, which is why the two are told apart before either is parsed.
 		$leading = $this->scanner->takeWhile(
 			static fn(int $point): bool => CodePoints::isWhitespace($point) || CodePoints::isBidi($point),
 		);
 
 		$next = $this->scanner->peek();
 
-		// A quoted pattern or a declaration keyword means complex-message, whose leading
-		// whitespace is insignificant -- so $leading is dropped on these two paths.
-		if ($next === self::BRACE_OPEN && $this->scanner->peek(1) === self::BRACE_OPEN) {
-			throw Unsupported::feature('a quoted pattern');
-		}
-
-		if ($next === self::DOT) {
-			throw $this->declarationOrNothing();
+		if ($next === self::DOT || ($next === self::BRACE_OPEN && $this->scanner->peek(1) === self::BRACE_OPEN)) {
+			return $this->complexMessage();
 		}
 
 		if ($next === null) {
 			// `o` with nothing after it. Still a simple message, and still that text.
-			return new Message($leading === [] ? [] : [Utf8::encode($leading)]);
+			return new PatternMessage($leading === [] ? [] : [Utf8::encode($leading)]);
 		}
 
 		// `simple-start = simple-start-char / escaped-char / placeholder`
@@ -95,37 +114,248 @@ final class Parser
 			&& $next !== self::BACKSLASH
 			&& $next !== self::BRACE_OPEN
 		) {
+			throw SyntaxError::expected('the start of a message', $next, $this->scanner->position());
+		}
+
+		return new PatternMessage($this->pattern($leading));
+	}
+
+	/** `complex-message = o *(declaration o) complex-body o` — the leading `o` is already read. */
+	private function complexMessage(): Message
+	{
+		$declarations = [];
+
+		while ($this->scanner->peek() === self::DOT) {
+			// `.match` ends the declarations and begins the body. Checked before trying to read a
+			// declaration, because otherwise the declaration reader would reject it by name.
+			if ($this->looksLike('.match')) {
+				break;
+			}
+
+			$declarations[] = $this->declaration();
+			$this->optional();
+		}
+
+		$body = $this->scanner->peek() === self::DOT
+			? $this->matcher($declarations)
+			: new PatternMessage($this->quotedPattern(), $declarations);
+
+		$this->optional();
+
+		if (!$this->scanner->atEnd()) {
 			throw SyntaxError::expected(
-				'the start of a message',
-				$next,
+				'the end of the message, because the body is already complete',
+				$this->scanner->peek(),
 				$this->scanner->position(),
 			);
 		}
 
-		return new Message($this->pattern($leading));
+		return $body;
 	}
 
-	/**
-	 * Which of the two complex-message openings this is, so the refusal can name it.
-	 *
-	 * Returns the exception rather than throwing it, so the caller's `throw` keeps the control
-	 * flow visible at the call site.
-	 */
-	private function declarationOrNothing(): SyntaxError|Unsupported
+	/** `declaration = input-declaration / local-declaration` */
+	private function declaration(): InputDeclaration|LocalDeclaration
 	{
-		foreach (['.input' => 'an input declaration', '.local' => 'a local declaration', '.match' => 'a matcher'] as $keyword => $named) {
-			if ($this->looksLike($keyword)) {
-				return Unsupported::feature($named);
+		if ($this->looksLike('.input')) {
+			// `input-declaration = input o variable-expression` -- `o`, so `.input{$x}` is legal.
+			$this->scanner->advance(self::KEYWORD_LENGTH);
+			$this->optional();
+
+			$at = $this->scanner->position();
+			$expression = $this->expressionIn('an input declaration');
+			$operand = $expression->arg;
+
+			if (!$operand instanceof VariableRef) {
+				// The schema narrows the expression's `arg` to a variable, and the declared name
+				// comes from it, so there is nothing to declare without one.
+				throw SyntaxError::expected('a variable in the input declaration', null, $at);
 			}
+
+			return new InputDeclaration($operand->name, $expression);
 		}
 
-		// A dot that begins no keyword is not a complex message waiting for a later milestone.
-		// It is not a message at all.
-		return SyntaxError::expected(
-			'a declaration or a matcher after "."',
+		if ($this->looksLike('.local')) {
+			// `local-declaration = local s variable o "=" o expression` -- the `s` is the only
+			// required whitespace in either declaration.
+			$this->scanner->advance(self::KEYWORD_LENGTH);
+
+			if (!$this->required()) {
+				throw SyntaxError::expected(
+					'whitespace after ".local"',
+					$this->scanner->peek(),
+					$this->scanner->position(),
+				);
+			}
+
+			$variable = $this->variable();
+			$this->optional();
+			$this->scanner->expect(self::EQUALS, 'an "=" after the declared variable');
+			$this->optional();
+
+			return new LocalDeclaration($variable->name, $this->expressionIn('a local declaration'));
+		}
+
+		throw SyntaxError::expected(
+			'".input", ".local" or ".match"',
 			$this->scanner->peek(1),
 			$this->scanner->position(),
 		);
+	}
+
+	/** A declaration's value: a placeholder that must be an expression rather than markup. */
+	private function expressionIn(string $what): Expression
+	{
+		$at = $this->scanner->position();
+		$placeholder = $this->placeholder();
+
+		if ($placeholder instanceof Markup) {
+			throw SyntaxError::expected('an expression in ' . $what . ', not markup', null, $at);
+		}
+
+		return $placeholder;
+	}
+
+	/**
+	 * `quoted-pattern = "{{" pattern "}}"`
+	 *
+	 * @return list<string|Expression|Markup>
+	 */
+	private function quotedPattern(): array
+	{
+		$at = $this->scanner->position();
+		$this->scanner->expect(self::BRACE_OPEN, 'a quoted pattern');
+		$this->scanner->expect(self::BRACE_OPEN, 'the second "{" of a quoted pattern');
+
+		$elements = $this->pattern([], quoted: true);
+
+		if ($this->scanner->peek() !== self::BRACE_CLOSE || $this->scanner->peek(1) !== self::BRACE_CLOSE) {
+			throw SyntaxError::expected('a "}}" to close the quoted pattern', $this->scanner->peek(), $at);
+		}
+
+		$this->scanner->advance(2);
+
+		return $elements;
+	}
+
+	/**
+	 * `matcher = match-statement s variant *(o variant)`
+	 *
+	 * @param list<InputDeclaration|LocalDeclaration> $declarations
+	 */
+	private function matcher(array $declarations): SelectMessage
+	{
+		$this->scanner->expect(self::DOT, 'a matcher');
+		$this->scanner->advance(self::KEYWORD_LENGTH - 1);
+
+		// `match-statement = match 1*(s selector)`, and `selector = variable`.
+		$selectors = [];
+		$spaced = false;
+
+		while (true) {
+			$spaced = $this->required();
+
+			if ($this->scanner->peek() !== self::DOLLAR) {
+				break;
+			}
+
+			if (!$spaced) {
+				throw SyntaxError::expected(
+					'whitespace before a selector',
+					$this->scanner->peek(),
+					$this->scanner->position(),
+				);
+			}
+
+			$selectors[] = $this->variable();
+		}
+
+		if ($selectors === []) {
+			throw SyntaxError::expected(
+				'at least one selector after ".match"',
+				$this->scanner->peek(),
+				$this->scanner->position(),
+			);
+		}
+
+		// `matcher = match-statement s variant *(o variant)`: the whitespace before the **first**
+		// variant is required, and the loop above has already measured whatever followed the last
+		// selector. So `.match $x* {{foo}}` is a syntax error, and so is a separator made only of
+		// bidi marks — syntax-errors.json 58 and 59 and bidi.json[11].
+		if (!$spaced) {
+			throw SyntaxError::expected(
+				'whitespace between the last selector and the first variant',
+				$this->scanner->peek(),
+				$this->scanner->position(),
+			);
+		}
+
+		$variants = [];
+
+		while ($this->startsAKey($this->scanner->peek())) {
+			$variants[] = $this->variant();
+			$this->optional();
+		}
+
+		if ($variants === []) {
+			throw SyntaxError::expected(
+				'at least one variant after the selectors',
+				$this->scanner->peek(),
+				$this->scanner->position(),
+			);
+		}
+
+		return new SelectMessage($selectors, $variants, $declarations);
+	}
+
+	/**
+	 * Whether a key could start here.
+	 *
+	 * `*` is not a name-char — name-start begins at `+` — so the catch-all can never be confused
+	 * with an unquoted literal, and `|*|` is a different key from `*`.
+	 */
+	private function startsAKey(?int $point): bool
+	{
+		return $point !== null
+			&& ($point === self::ASTERISK || $point === self::PIPE || CodePoints::isNameChar($point));
+	}
+
+	/** `variant = key *(s key) o quoted-pattern` */
+	private function variant(): Variant
+	{
+		$keys = [$this->variantKey()];
+
+		while (true) {
+			$spaced = $this->required();
+			$point = $this->scanner->peek();
+
+			if ($point === self::BRACE_OPEN) {
+				break;
+			}
+
+			if ($point === null) {
+				throw SyntaxError::expected('a quoted pattern for this variant', null, $this->scanner->position());
+			}
+
+			if (!$spaced) {
+				throw SyntaxError::expected('whitespace between variant keys', $point, $this->scanner->position());
+			}
+
+			$keys[] = $this->variantKey();
+		}
+
+		return new Variant($keys, $this->quotedPattern());
+	}
+
+	/** `key = literal / "*"` */
+	private function variantKey(): Literal|CatchAll
+	{
+		if ($this->scanner->peek() === self::ASTERISK) {
+			$this->scanner->advance();
+
+			return new CatchAll();
+		}
+
+		return $this->literal();
 	}
 
 	/** Whether the cursor sits on this exact ASCII keyword. Keywords are case-sensitive. */
@@ -144,9 +374,11 @@ final class Parser
 	 * `pattern = *(text-char / escaped-char / placeholder)`
 	 *
 	 * @param list<int> $leading code points already read, which belong to the first text run
+	 * @param bool $quoted true inside `{{…}}`, where `}}` ends the pattern and a lone `}` is still
+	 *        an error — the same two characters mean different things in the two contexts
 	 * @return list<string|Expression|Markup>
 	 */
-	private function pattern(array $leading): array
+	private function pattern(array $leading, bool $quoted = false): array
 	{
 		$elements = [];
 		$text = $leading;
@@ -165,6 +397,10 @@ final class Parser
 			}
 
 			if ($point === self::BRACE_CLOSE) {
+				if ($quoted && $this->scanner->peek(1) === self::BRACE_CLOSE) {
+					break;
+				}
+
 				throw SyntaxError::expected(
 					'text or a placeholder (write "\\}" for a literal brace)',
 					$point,
@@ -210,7 +446,7 @@ final class Parser
 	private function placeholder(): Expression|Markup
 	{
 		$this->scanner->expect(self::BRACE_OPEN, 'a placeholder');
-		$this->skipWhitespace();
+		$this->optional();
 
 		$point = $this->scanner->peek();
 
@@ -248,7 +484,7 @@ final class Parser
 			[$function, $attributes] = $this->functionAndTrailer();
 		} else {
 			$arg = $point === self::DOLLAR ? $this->variable() : $this->literal();
-			$spaced = $this->skipWhitespace() > 0;
+			$spaced = $this->required();
 
 			if ($spaced && $this->scanner->peek() === self::COLON) {
 				[$function, $attributes] = $this->functionAndTrailer();
@@ -338,7 +574,7 @@ final class Parser
 
 		while (true) {
 			if (!$spaced) {
-				$spaced = $this->skipWhitespace() > 0;
+				$spaced = $this->required();
 			}
 
 			$point = $this->scanner->peek();
@@ -409,9 +645,9 @@ final class Parser
 	private function option(): array
 	{
 		$name = $this->identifier();
-		$this->skipWhitespace();
+		$this->optional();
 		$this->scanner->expect(self::EQUALS, 'an "=" after the option name');
-		$this->skipWhitespace();
+		$this->optional();
 
 		$value = $this->scanner->peek() === self::DOLLAR ? $this->variable() : $this->literal();
 
@@ -429,7 +665,7 @@ final class Parser
 	{
 		$this->scanner->expect(self::AT, 'an attribute');
 		$name = $this->identifier();
-		$spacedAfter = $this->skipWhitespace() > 0;
+		$spacedAfter = $this->required();
 
 		if (!$this->scanner->take(self::EQUALS)) {
 			// No value, so that whitespace was the `s` before whatever comes next. Reporting it
@@ -441,7 +677,7 @@ final class Parser
 			return [$name, true, $spacedAfter];
 		}
 
-		$this->skipWhitespace();
+		$this->optional();
 
 		return [$name, $this->literal(), false];
 	}
@@ -545,11 +781,41 @@ final class Parser
 		return Utf8::encode($run);
 	}
 
-	/** `o = *(ws / bidi)`, and the count is how a caller tells `s` from `o`. */
-	private function skipWhitespace(): int
+	/** `o = *(ws / bidi)` — optional whitespace, where a bidi mark counts. */
+	private function optional(): void
 	{
-		return count($this->scanner->takeWhile(
+		$this->scanner->takeWhile(
 			static fn(int $point): bool => CodePoints::isWhitespace($point) || CodePoints::isBidi($point),
-		));
+		);
+	}
+
+	/**
+	 * `s = *bidi ws o` — required whitespace, which a bidi mark alone does **not** satisfy.
+	 *
+	 * The distinction is easy to miss and the conformance suite is strict about it: in
+	 * `.match $x` followed immediately by `*`, and in `.match $x` separated from its variant by
+	 * nothing but U+061C ARABIC LETTER MARK, there is no `s` and both are syntax errors.
+	 * Treating the two as one helper accepted both — bidi.json[11] and syntax-errors.json
+	 * 58 and 59 caught it.
+	 *
+	 * Whatever bidi marks precede the whitespace are consumed either way, which is harmless:
+	 * `o` admits them, so a caller that finds no `s` has lost nothing it could have used.
+	 *
+	 * @return bool whether an actual whitespace character was there
+	 */
+	private function required(): bool
+	{
+		$this->scanner->takeWhile(CodePoints::isBidi(...));
+
+		$point = $this->scanner->peek();
+
+		if ($point === null || !CodePoints::isWhitespace($point)) {
+			return false;
+		}
+
+		$this->scanner->advance();
+		$this->optional();
+
+		return true;
 	}
 }
