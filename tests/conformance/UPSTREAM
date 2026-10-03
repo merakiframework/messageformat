@@ -1,0 +1,7 @@
+# The conformance suite in this directory is a verbatim copy. Do not edit it by hand.
+# Refresh with `composer suite:update`; `composer suite:check` reports when it is stale.
+repository = unicode-org/message-format-wg
+directory = test
+commit = 5c4ddb27e726fd7881c1787a632efba83ab0d850
+date = 2026-08-31T12:21:14Z
+files = 19
