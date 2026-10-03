@@ -5,10 +5,19 @@ declare(strict_types=1);
  * Formatting, fixed automatically. Only rules that cannot change behaviour.
  *
  * This is meraki/schema's configuration minus the three custom fixers — Meraki/grouped_imports,
- * Meraki/no_blank_line_after_opening_tag and Meraki/parenthesized_ternary_condition — which
- * live in that package's tools/CodeStyle and are not worth vendoring a second copy of. The
- * conventions they enforce still apply here and are written by hand; if a third package ever
- * wants them, they belong in a meraki/code-style package rather than in a third copy.
+ * Meraki/no_blank_line_after_opening_tag and Meraki/parenthesized_ternary_condition — which live
+ * in that package's tools/CodeStyle and are not worth vendoring a second copy of. If a third
+ * package ever wants them, they belong in a meraki/code-style package rather than in a third
+ * copy.
+ *
+ * Two of those three conventions survive by hand here, because nothing in the ruleset below
+ * fights them: declare(strict_types=1) on line 2, and parenthesised compound ternary conditions.
+ *
+ * **Grouped imports do not.** schema separates the Meraki, vendor and global import tiers with
+ * blank lines, and @PSR12 removes those separators — so writing them by hand here fails
+ * `composer test:style`. Imports in this package are therefore ordered nearest-first but not
+ * blank-line separated. That is a real divergence from schema, not an oversight, and it goes
+ * away if the fixer is ever shared.
  *
  * The rules that must never be enabled are documented at length in meraki/schema's copy. The
  * short list: no_unneeded_control_parentheses, no_useless_concat_operator, strict_comparison,
