@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # A button. Without it the conformance-pin job below could only ever run on a Monday, which
+  # makes a job nobody has seen succeed — and a job nobody has seen succeed is not a check.
+  workflow_dispatch:
   schedule:
     # Mondays, 06:00 UTC. Only the conformance-pin check needs this: the vendored suite is a
     # copy, so upstream moving is something CI has to go and look for rather than be told.
@@ -92,7 +95,7 @@ jobs:
   conformance-pin:
     name: conformance pin
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
 
