@@ -1,0 +1,97 @@
+{
+    "name": "meraki/messageformat",
+    "description": "Unicode MessageFormat 2 for PHP: the syntax, data model, pattern selection and default function registry, validated against the Unicode working group's own conformance suite.",
+    "type": "library",
+    "keywords": [
+        "messageformat",
+        "mf2",
+        "icu",
+        "unicode",
+        "cldr",
+        "i18n",
+        "l10n",
+        "plural",
+        "localization",
+        "internationalization"
+    ],
+    "homepage": "https://github.com/merakiframework/messageformat",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Nathan",
+            "email": "nbish11@hotmail.com"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/merakiframework/messageformat/issues",
+        "source": "https://github.com/merakiframework/messageformat"
+    },
+    "require": {
+        "php": "^8.5",
+        "ext-intl": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.3",
+        "phpstan/phpstan": "^2.2",
+        "phpstan/phpstan-strict-rules": "^2.0",
+        "friendsofphp/php-cs-fixer": "^3.95"
+    },
+    "suggest": {
+        "meraki/messageformat-resource": "Message ids and catalogue files: the half MessageFormat 2 deliberately leaves to the application"
+    },
+    "autoload": {
+        "psr-4": {
+            "Meraki\\MessageFormat\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Meraki\\MessageFormat\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "test:environment": "php tools/check-environment.php",
+        "test:conformance": "phpunit --testsuite conformance",
+        "test:coverage": [
+            "@putenv XDEBUG_MODE=coverage",
+            "phpunit --coverage-text"
+        ],
+        "analyse": "phpstan analyse --no-progress --memory-limit=1G",
+        "style": "php-cs-fixer fix",
+        "test:style": "php-cs-fixer fix --dry-run --diff --show-progress=none",
+        "hooks:install": "git config core.hooksPath .githooks",
+        "post-install-cmd": "@hooks:install",
+        "suite:update": "php tools/update-conformance-suite.php",
+        "suite:check": "php tools/update-conformance-suite.php --check",
+        "ci": [
+            "@test:environment",
+            "@composer validate --strict",
+            "@composer audit",
+            "@analyse",
+            "@test:style",
+            "@test:coverage"
+        ]
+    },
+    "scripts-descriptions": {
+        "test": "Run the test suite.",
+        "test:environment": "Fail if the interpreter cannot answer what the suite asks of it.",
+        "test:conformance": "Run only the Unicode conformance suite.",
+        "test:coverage": "Run the suite with coverage (needs Xdebug or pcov).",
+        "analyse": "Run PHPStan.",
+        "style": "Fix formatting.",
+        "test:style": "Fail if anything is unformatted.",
+        "hooks:install": "Point git at .githooks.",
+        "suite:update": "Re-download the Unicode conformance suite and record its commit SHA.",
+        "suite:check": "Fail if the vendored conformance suite is behind upstream.",
+        "ci": "Run everything CI runs, in the same order."
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "1.0.x-dev"
+        }
+    }
+}

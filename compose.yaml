@@ -1,0 +1,69 @@
+# Running the suite without VS Code, and running it against more than one ICU.
+#
+#   docker compose run --rm dev composer ci        the development image, ICU 76
+#   docker compose run --rm icu72 composer test    Debian 12, ICU 72 / CLDR 42
+#   docker compose run --rm icu78 composer test    Alpine 3.24, ICU 78 / CLDR 48
+#   docker compose run --rm dev bash               a shell, if you want to poke about
+#
+# The three services differ only in base image. That is the point: when a conformance assertion
+# passes on one and fails on another, the difference is CLDR data and not this library, and the
+# `icu` PHPUnit group is where such an assertion belongs.
+#
+# Each service gets its own vendor volume. Sharing one would mean Composer's platform check
+# resolved against whichever ICU happened to install last.
+
+name: meraki-messageformat
+
+x-common: &common
+  working_dir: /workspace
+  # Composer writes a lock file and the suite writes a cache; neither should need a TTY.
+  tty: true
+  environment:
+    COMPOSER_NO_INTERACTION: "1"
+    # Keeps `composer ci` honest about what it is running on.
+    MERAKI_SUITE_CONTEXT: compose
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+      args:
+        PHP_BASE: 8.5-cli-trixie
+    <<: *common
+    volumes:
+      - .:/workspace
+      - dev-vendor:/workspace/vendor
+      - dev-composer:/home/dev/.composer
+
+  icu72:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+      args:
+        PHP_BASE: 8.5-cli-bookworm
+    <<: *common
+    volumes:
+      - .:/workspace
+      - icu72-vendor:/workspace/vendor
+      - icu72-composer:/home/dev/.composer
+
+  icu78:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile.alpine
+      args:
+        PHP_BASE: 8.5-cli-alpine3.24
+    <<: *common
+    volumes:
+      - .:/workspace
+      - icu78-vendor:/workspace/vendor
+      - icu78-composer:/home/dev/.composer
+
+volumes:
+  dev-vendor:
+  dev-composer:
+  icu72-vendor:
+  icu72-composer:
+  icu78-vendor:
+  icu78-composer:

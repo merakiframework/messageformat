@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.php text eol=lf
+
+# The conformance fixtures are a verbatim copy of an upstream commit. Normalising them would
+# make `suite:check` diff against a file git had rewritten.
+tests/conformance/** -text
+
+# Git for Windows runs hooks through its bundled sh. A CRLF on the #!/bin/sh line breaks
+# the hook with an error that does not mention line endings.
+.githooks/* text eol=lf

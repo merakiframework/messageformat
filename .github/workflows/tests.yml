@@ -1,0 +1,93 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Mondays, 06:00 UTC. Only the conformance-pin check needs this: the vendored suite is a
+    # copy, so upstream moving is something CI has to go and look for rather than be told.
+    - cron: '0 6 * * 1'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The gate. One ICU, every check, and the one job whose failure means this package is wrong.
+  verify:
+    name: verify (ICU 76 / CLDR 46)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the development image
+        run: docker compose build dev
+
+      - name: Install dependencies
+        run: docker compose run --rm dev composer install
+
+      - name: Check the environment before trusting any assertion
+        run: docker compose run --rm dev composer test:environment
+
+      - name: Validate composer.json
+        run: docker compose run --rm dev composer validate --strict
+
+      - name: Audit dependencies
+        run: docker compose run --rm dev composer audit
+
+      - name: Static analysis
+        run: docker compose run --rm dev composer analyse
+
+      - name: Code style
+        run: docker compose run --rm dev composer test:style
+
+      - name: Tests with coverage
+        run: docker compose run --rm dev composer test:coverage
+
+  # Drift detection, not correctness. These exist so that a CLDR-dependent expectation shows up
+  # as "the data moved" on a known-older and a known-newer ICU, rather than as a mystery on
+  # somebody's laptop. Allowed to fail: a difference here is a review prompt.
+  icu-matrix:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: icu72
+            name: icu 72 / CLDR 42 (Debian 12)
+          - service: icu78
+            name: icu 78 / CLDR 48 (Alpine 3.24)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: docker compose build ${{ matrix.service }}
+
+      - name: Install dependencies
+        run: docker compose run --rm ${{ matrix.service }} composer install
+
+      - name: Check the environment
+        run: docker compose run --rm ${{ matrix.service }} composer test:environment
+
+      - name: Tests
+        run: docker compose run --rm ${{ matrix.service }} composer test
+
+  # Reports when the vendored conformance suite is behind upstream. Scheduled rather than
+  # per-push: an upstream change is not a reason to fail somebody's unrelated commit.
+  conformance-pin:
+    name: conformance pin
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the development image
+        run: docker compose build dev
+
+      - name: Compare the pin against upstream
+        run: docker compose run --rm dev composer suite:check

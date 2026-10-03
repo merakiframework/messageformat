@@ -1,0 +1,36 @@
+# Mirrors meraki/schema. The 110-column limit lives here and nowhere else: it is a soft limit,
+# PHP-CS-Fixer has no line-length rule, and a too-long line is usually best fixed by a shorter
+# name or fewer parameters, which no tool can decide.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.php]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+max_line_length = 110
+
+[*.{json,xml,neon,dist}]
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = false
+
+# Upstream's files, byte-for-byte. Never reformatted, so a diff against upstream stays readable.
+[tests/conformance/**]
+indent_style = unset
+indent_size = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset

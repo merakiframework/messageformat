@@ -1,0 +1,63 @@
+# The newest-ICU corner of the matrix. Not the development image — see ./Dockerfile for that.
+#
+# Alpine is here for one reason: it is the only base that packages ICU 78 (CLDR 48), which is
+# where ICU4J's MessageFormat 2 implementation currently sits. Debian stable is at 76 and
+# Debian 12 at 72, so without this the matrix could not reach past CLDR 46.
+#
+# ## The trap this file exists to avoid
+#
+# `icu-libs` depends on the *virtual* package `icu-data`, and two packages provide it:
+#
+#   icu-data-en     2.9 MB   English only
+#   icu-data-full    31 MB   every locale CLDR ships
+#
+# Installing `icu-dev` alone can resolve that virtual to `icu-data-en`, and nothing fails: intl
+# loads, NumberFormatter works, INTL_ICU_VERSION reports 78.1. Every non-English locale just
+# quietly falls back to root — so Czech would select `one`/`other` instead of
+# `one`/`few`/`many`/`other`, and the plural tests would be wrong rather than red.
+#
+# icu-data-full is therefore not an optimisation to drop. tools/check-environment.php asserts it
+# is really there, because "the data is missing" and "the library is broken" look identical from
+# inside a failing assertion.
+
+ARG PHP_BASE=8.5-cli-alpine3.24
+FROM php:${PHP_BASE}
+
+ARG PHP_BASE
+ENV MERAKI_PHP_BASE=${PHP_BASE}
+
+RUN set -eux; \
+	apk add --no-cache \
+		git \
+		icu-data-full \
+		icu-dev \
+		libzip-dev \
+		unzip; \
+	apk add --no-cache --virtual .build-deps ${PHPIZE_DEPS}; \
+	docker-php-ext-configure intl; \
+	docker-php-ext-install -j"$(nproc)" intl zip; \
+	apk del --no-network .build-deps
+
+RUN { \
+		echo 'date.timezone=UTC'; \
+		echo 'memory_limit=1G'; \
+		echo 'error_reporting=E_ALL'; \
+		echo 'zend.assertions=1'; \
+	} > /usr/local/etc/php/conf.d/zz-meraki.ini
+
+COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
+
+RUN set -eux; \
+	adduser -D -u 1000 dev; \
+	# Docker seeds an empty named volume from whatever the image has at the mount point,
+	# ownership included — so these have to exist, owned by dev, before compose mounts
+	# volumes over them. Without this, `composer install` fails on its first run with
+	# "/workspace/vendor/composer does not exist and could not be created".
+	mkdir -p /home/dev/.composer /workspace/vendor; \
+	chown -R dev:dev /home/dev /workspace
+
+ENV COMPOSER_HOME=/home/dev/.composer
+ENV COMPOSER_NO_INTERACTION=1
+
+USER dev
+WORKDIR /workspace

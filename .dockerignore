@@ -1,0 +1,15 @@
+# The build context is the whole package, because the dev container bind-mounts it. Everything
+# here is either host-specific, regenerated inside the container, or large enough that sending
+# it would slow every build down for nothing.
+.git
+.github
+.idea
+.vscode
+.phpunit.cache
+.php-cs-fixer.cache
+
+# Installed inside the container, against the container's own ICU. A vendor/ built on the host
+# would be the one thing a container is supposed to stop mattering.
+vendor/
+
+*.log

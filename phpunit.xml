@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/11.3/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         cacheDirectory=".phpunit.cache"
+         executionOrder="depends,defects"
+         shortenArraysForExportThreshold="10"
+         requireCoverageMetadata="true"
+         beStrictAboutCoverageMetadata="false"
+         beStrictAboutOutputDuringTests="true"
+         displayDetailsOnTestsThatTriggerDeprecations="true"
+         failOnPhpunitDeprecation="true"
+         failOnEmptyTestSuite="true"
+         failOnRisky="true"
+         failOnWarning="true">
+    <!--
+        Two suites, because they fail for different reasons and you want to know which.
+
+        `unit` is ours: it can only go red because this library is wrong. `conformance` is
+        driven by a vendored copy of the Unicode working group's own JSON fixtures, so it can
+        also go red because upstream changed, or because the installed ICU disagrees with the
+        one the fixtures were generated against. Keeping them apart means a red build names
+        its own cause.
+
+        failOnEmptyTestSuite is on for one specific reason: the conformance provider globs
+        JSON out of tests/conformance, and a mis-globbed path would otherwise yield zero
+        cases and report a pass. An empty suite is the failure mode most likely to be
+        mistaken for success, so it is the one made loudest.
+
+        beStrictAboutCoverageMetadata is off, matching meraki/schema: a conformance test
+        legitimately executes most of the library, and naming all of it in #[UsesClass] would
+        be hundreds of attributes that assert nothing. requireCoverageMetadata stays on, so
+        every test still declares what it covers.
+    -->
+
+    <testsuites>
+        <testsuite name="unit">
+            <directory>tests</directory>
+            <exclude>tests/Conformance</exclude>
+        </testsuite>
+        <testsuite name="conformance">
+            <directory>tests/Conformance</directory>
+        </testsuite>
+    </testsuites>
+
+    <source ignoreIndirectDeprecations="true" restrictNotices="true" restrictWarnings="true">
+        <include>
+            <directory>src</directory>
+        </include>
+    </source>
+</phpunit>

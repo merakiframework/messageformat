@@ -1,0 +1,80 @@
+{
+    // The canonical way to work on this package. Everything the tests need — PHP 8.5, ext-intl,
+    // a pinned ICU, Xdebug, Composer — comes from .devcontainer/Dockerfile, so no extension has
+    // to be enabled in a global php.ini and no two machines disagree about what "green" means.
+    //
+    // Reopen in container from VS Code, or without VS Code:
+    //   docker compose run --rm dev composer ci
+    "name": "meraki/messageformat",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": "..",
+        "args": {
+            // Debian 13, ICU 76 / CLDR 46. See the Dockerfile for why not ICU 77.
+            "PHP_BASE": "8.5-cli-trixie"
+        }
+    },
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+    "remoteUser": "dev",
+
+    // vendor/ lives in a volume rather than on the bind mount. The host checkout sits in
+    // OneDrive, and thousands of small files crossing a Windows bind mount is the difference
+    // between a one-second test run and a ten-second one — and OneDrive would try to sync them.
+    "mounts": [
+        "source=meraki-messageformat-vendor,target=/workspace/vendor,type=volume",
+        "source=meraki-messageformat-composer,target=/home/dev/.composer,type=volume"
+    ],
+
+    // A safety net, not the mechanism. The image creates /workspace/vendor and the composer home
+    // as the dev user, and Docker seeds an empty named volume with the image's ownership, so a
+    // fresh volume is already writable. This only matters for a volume left over from an image
+    // that did not do that — hence the `|| true`, which keeps a missing sudo from failing create.
+    "onCreateCommand": "sudo chown -R dev:dev /workspace/vendor /home/dev/.composer || true",
+    "updateContentCommand": "composer install --no-interaction",
+    "postAttachCommand": "php -r \"printf('PHP %s, ICU %s, ICU data %s%s', PHP_VERSION, INTL_ICU_VERSION, INTL_ICU_DATA_VERSION, PHP_EOL);\"",
+
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "bmewburn.vscode-intelephense-client",
+                "xdebug.php-debug",
+                "junstyle.php-cs-fixer",
+                "SanderRonde.phpstan-vscode",
+                "EditorConfig.EditorConfig",
+                "recca0120.vscode-phpunit"
+            ],
+            "settings": {
+                "php.validate.executablePath": "/usr/local/bin/php",
+                "intelephense.environment.phpVersion": "8.5.0",
+                "intelephense.environment.includePaths": ["/workspace/vendor"],
+                "phpunit.phpunit": "/workspace/vendor/bin/phpunit",
+                "phpunit.php": "/usr/local/bin/php",
+                "phpstan.binPath": "/workspace/vendor/bin/phpstan",
+                "phpstan.configFile": "/workspace/phpstan.neon",
+                "php-cs-fixer.executablePath": "/workspace/vendor/bin/php-cs-fixer",
+                "php-cs-fixer.config": "/workspace/.php-cs-fixer.dist.php",
+                "php-cs-fixer.onsave": false,
+                "[php]": {
+                    "editor.insertSpaces": false,
+                    "editor.tabSize": 4,
+                    "editor.rulers": [110]
+                },
+                "files.eol": "\n"
+            }
+        }
+    },
+
+    "features": {
+        // sudo, for the chown above and for installing a package while debugging. The image
+        // itself does not depend on this feature; removing it only costs that convenience.
+        "ghcr.io/devcontainers/features/common-utils:2": {
+            "installZsh": false,
+            "installOhMyZsh": false,
+            "upgradePackages": false,
+            "username": "dev",
+            "userUid": "1000",
+            "userGid": "1000"
+        }
+    }
+}

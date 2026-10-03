@@ -1,0 +1,13 @@
+# Level max, no baseline. This package is new, so there is nothing to grandfather in, and the
+# one thing it does is manipulate strings and integers precisely — which is exactly what the
+# higher levels check. meraki/schema sits at level 6 because its generics predate the analysis;
+# that reason does not apply here.
+parameters:
+    level: max
+    paths:
+        - src
+        - tests
+        - tools
+
+includes:
+    - vendor/phpstan/phpstan-strict-rules/rules.neon

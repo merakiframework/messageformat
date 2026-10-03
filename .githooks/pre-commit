@@ -1,0 +1,43 @@
+#!/bin/sh
+#
+# Format what can be formatted safely, and refuse the one case where doing so would change
+# what is being committed. By the time a commit exists, the files in it are formatted.
+#
+# Git has no hook for `git add` — nothing fires there, and post-index-change runs after the
+# index is written and cannot abort. So this runs at commit time instead, which also catches
+# files staged by `git add -p`, `git commit -a` or the editor rather than only `git add`.
+#
+# This is not the enforcement boundary: `git commit --no-verify` skips it, and a clone that
+# never ran `composer install` never installs it. CI is what actually holds the line.
+#
+# Unlike meraki/schema's copy, there is no risky-rules report here, because this package has no
+# .php-cs-fixer-risky.dist.php yet. Add that half back if one ever lands.
+set -eu
+
+FIXER=vendor/bin/php-cs-fixer
+
+[ -x "$FIXER" ] || { echo "pre-commit: $FIXER not found; run composer install"; exit 1; }
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR -- '*.php')
+
+[ -n "$staged" ] || exit 0
+
+# A file with both staged and unstaged changes would have its working-tree copy formatted and
+# re-staged, quietly pulling the unstaged edits into the commit. Refuse rather than do that.
+partial=$(git diff --name-only -- $staged)
+
+if [ -n "$partial" ]; then
+	echo "pre-commit: these files are staged but also have unstaged changes:"
+	echo "$partial" | sed 's/^/  /'
+	echo
+	echo "Formatting them now would pull the unstaged edits into this commit."
+	echo "Stage them fully, or commit them separately."
+	exit 1
+fi
+
+# --config is not optional here even though PHP-CS-Fixer would discover the same file on its
+# own: given more than one path it refuses to guess, with "For multiple paths config parameter
+# is required". --path-mode=intersection is what narrows the config's Finder to the staged
+# files; without it, passing paths makes PHP-CS-Fixer ignore the Finder altogether.
+"$FIXER" fix --config=.php-cs-fixer.dist.php --path-mode=intersection --quiet -- $staged
+git add -- $staged
