@@ -12,9 +12,18 @@ on:
     # copy, so upstream moving is something CI has to go and look for rather than be told.
     - cron: '0 6 * * 1'
 
+# Superseding a pull request's earlier push is a saving. Superseding anything on a branch that
+# keeps history is a loss: the run IS the record of whether that commit passed, and cancelling it
+# leaves the commit marked failed-looking forever.
+#
+# Both halves of this were learned the hard way. A workflow_dispatch run and the push run for the
+# same commit shared the group "tests-refs/heads/main", so dispatching while the push run was in
+# flight cancelled it, and the commit ended up carrying four cancelled checks beside four
+# successful ones. Hence the event name in the group: a manual run and a push are answering
+# different questions and have no business contending.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # The gate. One ICU, every check, and the one job whose failure means this package is wrong.
