@@ -38,8 +38,12 @@
     -->
 
     <testsuites>
-        <testsuite name="default">
+        <testsuite name="unit">
             <directory>tests</directory>
+            <exclude>tests/Conformance</exclude>
+        </testsuite>
+        <testsuite name="conformance">
+            <directory>tests/Conformance</directory>
         </testsuite>
     </testsuites>
 

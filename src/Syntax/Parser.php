@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Meraki\MessageFormat\Syntax;
 
+use Meraki\MessageFormat\Error\DataModelError;
 use Meraki\MessageFormat\Error\SyntaxError;
 use Meraki\MessageFormat\Error\Unsupported;
 use Meraki\MessageFormat\Model\Expression;
@@ -55,6 +56,7 @@ final class Parser
 
 	/**
 	 * @throws SyntaxError if the source is not well-formed
+	 * @throws DataModelError if it is well-formed and still not a valid message
 	 * @throws Unsupported if it is a complex message, which is valid but not implemented yet
 	 */
 	public static function parse(string $source): Message
@@ -355,10 +357,16 @@ final class Parser
 			}
 
 			if ($point === self::AT) {
-				[$name, $value] = $this->attribute();
-				$this->refuseDuplicate($attributes, $name, 'attribute');
+				[$name, $value, $spacedAfter] = $this->attribute();
+
+				// Not checked for duplicates. errors.md names Duplicate Option Name for options
+				// and nothing at all for attributes, so a repeated attribute is valid and the
+				// later one simply wins. Refusing it would reject a message the spec accepts.
 				$attributes[$name] = $value;
-				$spaced = false;
+
+				// A valueless attribute swallows the whitespace that separates it from the next
+				// item, so it hands back whether it did.
+				$spaced = $spacedAfter;
 				continue;
 			}
 
@@ -380,7 +388,14 @@ final class Parser
 			}
 
 			[$name, $value] = $this->option();
-			$this->refuseDuplicate($options, $name, 'option');
+
+			// A Data Model Error, not a Syntax Error. `bad {:p option=x option=x}` is
+			// well-formed -- every production is satisfied -- and still not a valid message, and
+			// data-model-errors.json expects `duplicate-option-name` for exactly it.
+			if (array_key_exists($name, $options)) {
+				throw DataModelError::duplicateOptionName($name);
+			}
+
 			$options[$name] = $value;
 			$spaced = false;
 		}
@@ -406,24 +421,29 @@ final class Parser
 	/**
 	 * `attribute = "@" identifier [o "=" o literal]`
 	 *
-	 * @return array{string, Literal|true}
+	 * @return array{string, Literal|true, bool} the name, the value, and whether trailing
+	 *         whitespace was consumed — which the caller needs, because the `o` before a possible
+	 *         `=` and the `s` before the next item are the same characters and there is no rewind
 	 */
 	private function attribute(): array
 	{
 		$this->scanner->expect(self::AT, 'an attribute');
 		$name = $this->identifier();
-		$this->skipWhitespace();
+		$spacedAfter = $this->skipWhitespace() > 0;
 
 		if (!$this->scanner->take(self::EQUALS)) {
-			// No value. The whitespace just read may have been the `s` before the next item, so
-			// nothing is consumed here that the trailer needs -- it reads whitespace again and
-			// finds none, which is the same answer.
-			return [$name, true];
+			// No value, so that whitespace was the `s` before whatever comes next. Reporting it
+			// is what stops `{42 @foo @bar=13}` being rejected for a missing space that was in
+			// fact eaten here. An earlier comment claimed the trailer could just read whitespace
+			// again and get "the same answer"; it cannot, because the trailer uses "no
+			// whitespace" to mean "required space missing". The conformance suite caught it
+			// twice, in syntax.json and functions/number.json.
+			return [$name, true, $spacedAfter];
 		}
 
 		$this->skipWhitespace();
 
-		return [$name, $this->literal()];
+		return [$name, $this->literal(), false];
 	}
 
 	/** `variable = "$" name` */
@@ -531,20 +551,5 @@ final class Parser
 		return count($this->scanner->takeWhile(
 			static fn(int $point): bool => CodePoints::isWhitespace($point) || CodePoints::isBidi($point),
 		));
-	}
-
-	/**
-	 * @param array<string, mixed> $seen
-	 * @throws SyntaxError
-	 */
-	private function refuseDuplicate(array $seen, string $name, string $kind): void
-	{
-		if (array_key_exists($name, $seen)) {
-			throw SyntaxError::expected(
-				sprintf('a %s other than "%s", which is already set', $kind, $name),
-				$this->scanner->peek(),
-				$this->scanner->position(),
-			);
-		}
 	}
 }

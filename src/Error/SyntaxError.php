@@ -16,6 +16,11 @@ use DomainException;
  */
 final class SyntaxError extends DomainException implements MessageFormatError
 {
+	public function type(): ErrorType
+	{
+		return ErrorType::Syntax;
+	}
+
 	public static function illFormedInput(string $why): self
 	{
 		return new self('The message is not well-formed UTF-8: ' . $why . '.');

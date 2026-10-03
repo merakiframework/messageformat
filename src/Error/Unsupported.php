@@ -17,6 +17,12 @@ use DomainException;
  */
 final class Unsupported extends DomainException implements MessageFormatError
 {
+	/** Not one of the specification's errors: this is a fact about the library, not the message. */
+	public function type(): ?ErrorType
+	{
+		return null;
+	}
+
 	public static function feature(string $named): self
 	{
 		return new self(sprintf(

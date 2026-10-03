@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Meraki\MessageFormat\Syntax;
 
+use Meraki\MessageFormat\Error\DataModelError;
+use Meraki\MessageFormat\Error\ErrorType;
 use Meraki\MessageFormat\Error\SyntaxError;
 use Meraki\MessageFormat\Error\Unsupported;
 use Meraki\MessageFormat\Model\Serializer;
@@ -384,6 +386,48 @@ final class ParserTest extends TestCase
 		$this->expectException(Unsupported::class);
 
 		Parser::parse($source);
+	}
+
+	/** @return iterable<string, array{string}> */
+	public static function duplicateOptions(): iterable
+	{
+		// Both from data-model-errors.json. Well-formed -- every production is satisfied -- and
+		// not valid messages, so the category is Data Model and not Syntax.
+		yield 'the same option twice' => ['bad {:placeholder option=x option=x}'];
+		yield 'the same namespaced option twice' => ['bad {:placeholder ns:option=x ns:option=y}'];
+		yield 'on markup' => ['{#tag opt=a opt=b}'];
+	}
+
+	#[Test]
+	#[DataProvider('duplicateOptions')]
+	public function a_repeated_option_is_a_data_model_error(string $source): void
+	{
+		$error = null;
+
+		try {
+			Parser::parse($source);
+		} catch (DataModelError $caught) {
+			$error = $caught;
+		}
+
+		self::assertNotNull($error, 'expected a DataModelError');
+		self::assertSame(ErrorType::DuplicateOptionName, $error->type());
+	}
+
+	#[Test]
+	public function a_repeated_attribute_is_not_an_error_and_the_later_one_wins(): void
+	{
+		// errors.md names Duplicate Option Name for options and nothing for attributes, so
+		// refusing this would reject a message the specification accepts. There is no fixture
+		// either way, which is why the reasoning rather than a fixture is recorded here.
+		self::assertSame(
+			self::message([[
+				'type' => 'expression',
+				'arg' => ['type' => 'variable', 'name' => 'n'],
+				'attributes' => ['a' => ['type' => 'literal', 'value' => 'second']],
+			]]),
+			self::parse('{$n @a=first @a=second}'),
+		);
 	}
 
 	#[Test]
