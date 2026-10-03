@@ -14,6 +14,11 @@
 
 name: meraki-messageformat
 
+# HOST_UID/HOST_GID exist because the container user must own the bind-mounted checkout.
+# Locally that is 1000 either way; a GitHub runner checks out as 1001, and a container running
+# as 1000 then cannot create .php-cs-fixer.cache in /workspace. The workflow sets these from
+# `id -u`/`id -g` rather than hardcoding a runner detail.
+
 x-common: &common
   working_dir: /workspace
   # Composer writes a lock file and the suite writes a cache; neither should need a TTY.
@@ -30,6 +35,8 @@ services:
       dockerfile: .devcontainer/Dockerfile
       args:
         PHP_BASE: 8.5-cli-trixie
+        USER_UID: ${HOST_UID:-1000}
+        USER_GID: ${HOST_GID:-1000}
     <<: *common
     volumes:
       - .:/workspace
@@ -42,6 +49,8 @@ services:
       dockerfile: .devcontainer/Dockerfile
       args:
         PHP_BASE: 8.5-cli-bookworm
+        USER_UID: ${HOST_UID:-1000}
+        USER_GID: ${HOST_GID:-1000}
     <<: *common
     volumes:
       - .:/workspace
@@ -54,6 +63,8 @@ services:
       dockerfile: .devcontainer/Dockerfile.alpine
       args:
         PHP_BASE: 8.5-cli-alpine3.24
+        USER_UID: ${HOST_UID:-1000}
+        USER_GID: ${HOST_GID:-1000}
     <<: *common
     volumes:
       - .:/workspace

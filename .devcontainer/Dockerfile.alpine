@@ -47,8 +47,12 @@ RUN { \
 
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 
+ARG USER_UID=1000
+ARG USER_GID=${USER_UID}
+
 RUN set -eux; \
-	adduser -D -u 1000 dev; \
+	addgroup -g "${USER_GID}" dev; \
+	adduser -D -u "${USER_UID}" -G dev dev; \
 	# Docker seeds an empty named volume from whatever the image has at the mount point,
 	# ownership included — so these have to exist, owned by dev, before compose mounts
 	# volumes over them. Without this, `composer install` fails on its first run with
